@@ -9,27 +9,45 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # プロジェクトがリポジトリ直下でも ClipKeep/ の中でも動くように場所を探す
+      # --- 診断: リポジトリに何が入っているか一覧を出す ---
+      - name: Show repository contents
+        run: |
+          echo "=== リポジトリ直下 ==="
+          ls -la
+          echo
+          echo "=== 全ファイル一覧（build/ 除く）==="
+          find . -type f -not -path './.git/*' -not -path '*/build/*' | sort
+          echo
+          echo "=== .github の中身 ==="
+          ls -laR .github || echo ".github がありません"
+
+      # --- プロジェクトの場所を探す（直下でもサブフォルダでもOK）---
       - name: Locate Gradle project
         id: loc
         run: |
           f=$(find . -name settings.gradle.kts -not -path '*/build/*' | head -1)
           if [ -z "$f" ]; then
-            echo "settings.gradle.kts が見つかりません。プロジェクトがアップロードされているか確認してください。"
-            ls -la
+            echo "::error::settings.gradle.kts が見つかりません。プロジェクト本体がアップロードされていません。"
             exit 1
           fi
           d=$(dirname "$f")
-          echo "見つかりました: $d"
+          echo "プロジェクト: $d"
           echo "dir=$d" >> "$GITHUB_OUTPUT"
+          echo "--- そのフォルダの中身 ---"
+          ls -la "$d"
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -46,3 +64,14 @@ jobs:
           name: ClipKeep-debug-apk
           path: ${{ steps.loc.outputs.dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+      # --- 失敗したときにレポートを回収する ---
+      - name: Upload build reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-reports
+          path: |
+            ${{ steps.loc.outputs.dir }}/app/build/reports/**
+            ${{ steps.loc.outputs.dir }}/build/reports/**
+          if-no-files-found: ignore
